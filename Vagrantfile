@@ -10,17 +10,27 @@ MACHINES = {
                    {ip: "192.168.50.10", adapter: 8, netmask: "255.255.255.0"},
                 ]
   },
+  :inetRouter2 => {
+        :box_name => "generic/ubuntu2204",
+        :vm_name => "inetRouter2",
+        :net => [
+                   {ip: "192.168.255.3", adapter: 2, netmask: "255.255.255.252", virtualbox__intnet: "router2-net"},
+                   {ip: "192.168.56.10", adapter: 3, netmask: "255.255.255.0", type: "hostonly"},
+                   {ip: "192.168.50.13", adapter: 8, netmask: "255.255.255.0"},
+                ]
+  },
   :centralRouter => {
         :box_name => "generic/ubuntu2204",
         :vm_name => "centralRouter",
         :net => [
                    {ip: "192.168.255.2", adapter: 2, netmask: "255.255.255.252", virtualbox__intnet: "router-net"},
-                   {ip: "192.168.0.1", adapter: 3, netmask: "255.255.255.240", virtualbox__intnet: "dir-net"},
-                   {ip: "192.168.0.33", adapter: 4, netmask: "255.255.255.240", virtualbox__intnet: "hw-net"},
-                   {ip: "192.168.0.65", adapter: 5, netmask: "255.255.255.192", virtualbox__intnet: "mgt-net"},
-                   {ip: "192.168.255.9", adapter: 6, netmask: "255.255.255.252", virtualbox__intnet: "office1-central"},
-                   {ip: "192.168.255.5", adapter: 7, netmask: "255.255.255.252", virtualbox__intnet: "office2-central"},
-                   {ip: "192.168.50.11", adapter: 8, netmask: "255.255.255.0"},
+                   {ip: "192.168.255.4", adapter: 3, netmask: "255.255.255.252", virtualbox__intnet: "router2-net"},
+                   {ip: "192.168.0.1", adapter: 4, netmask: "255.255.255.240", virtualbox__intnet: "dir-net"},
+                   {ip: "192.168.0.33", adapter: 5, netmask: "255.255.255.240", virtualbox__intnet: "hw-net"},
+                   {ip: "192.168.0.65", adapter: 6, netmask: "255.255.255.192", virtualbox__intnet: "mgt-net"},
+                   {ip: "192.168.255.9", adapter: 7, netmask: "255.255.255.252", virtualbox__intnet: "office1-central"},
+                   {ip: "192.168.255.5", adapter: 8, netmask: "255.255.255.252", virtualbox__intnet: "office2-central"},
+                   {ip: "192.168.50.11", adapter: 9, netmask: "255.255.255.0"},
                 ]
   },
   :centralServer => {
@@ -73,15 +83,55 @@ MACHINES = {
 }
 
 Vagrant.configure("2") do |config|
-  MACHINES.each do |boxname, boxconfig|
+  config.vm.define "inetRouter" do |box|
+    box.vm.box = MACHINES[:inetRouter][:box_name]
+    box.vm.host_name = MACHINES[:inetRouter][:vm_name]
+    box.vm.provider "virtualbox" do |v|
+      v.memory = 768
+      v.cpus = 1
+    end
+    MACHINES[:inetRouter][:net].each do |ipconf|
+      box.vm.network "private_network", ip: ipconf[:ip], adapter: ipconf[:adapter], netmask: ipconf[:netmask], virtualbox__intnet: ipconf[:virtualbox__intnet]
+    end
+    box.vm.provision "shell", inline: <<-SHELL
+      mkdir -p ~root/.ssh
+      cp ~vagrant/.ssh/auth* ~root/.ssh
+      apt-get update
+      apt-get install -y traceroute
+    SHELL
+  end
+
+  config.vm.define "inetRouter2" do |box|
+    box.vm.box = MACHINES[:inetRouter2][:box_name]
+    box.vm.host_name = MACHINES[:inetRouter2][:vm_name]
+    box.vm.provider "virtualbox" do |v|
+      v.memory = 768
+      v.cpus = 1
+    end
+    MACHINES[:inetRouter2][:net].each do |ipconf|
+      if ipconf[:type] == "hostonly"
+        box.vm.network "private_network", ip: ipconf[:ip], adapter: ipconf[:adapter], netmask: ipconf[:netmask], type: "dhcp"
+      else
+        box.vm.network "private_network", ip: ipconf[:ip], adapter: ipconf[:adapter], netmask: ipconf[:netmask], virtualbox__intnet: ipconf[:virtualbox__intnet]
+      end
+    end
+    box.vm.provision "shell", inline: <<-SHELL
+      mkdir -p ~root/.ssh
+      cp ~vagrant/.ssh/auth* ~root/.ssh
+      apt-get update
+      apt-get install -y traceroute
+    SHELL
+  end
+
+  [:centralRouter, :centralServer, :office1Router, :office1Server, :office2Router, :office2Server].each do |boxname|
     config.vm.define boxname do |box|
-      box.vm.box = boxconfig[:box_name]
-      box.vm.host_name = boxconfig[:vm_name]
+      box.vm.box = MACHINES[boxname][:box_name]
+      box.vm.host_name = MACHINES[boxname][:vm_name]
       box.vm.provider "virtualbox" do |v|
         v.memory = 768
         v.cpus = 1
       end
-      boxconfig[:net].each do |ipconf|
+      MACHINES[boxname][:net].each do |ipconf|
         box.vm.network "private_network", ip: ipconf[:ip], adapter: ipconf[:adapter], netmask: ipconf[:netmask], virtualbox__intnet: ipconf[:virtualbox__intnet]
       end
       box.vm.provision "shell", inline: <<-SHELL
@@ -90,7 +140,7 @@ Vagrant.configure("2") do |config|
         apt-get update
         apt-get install -y traceroute
       SHELL
-      if boxconfig[:vm_name] == "office2Server"
+      if boxname.to_s == "office2Server"
         box.vm.provision "ansible" do |ansible|
           ansible.playbook = "ansible/provision.yml"
           ansible.inventory_path = "ansible/hosts"

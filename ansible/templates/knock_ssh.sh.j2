@@ -1,0 +1,5 @@
+#!/bin/bash
+HOST="192.168.255.1"
+knock $HOST 7000 8000 9000
+ssh vagrant@$HOST
+knock $HOST 9000 8000 7000
